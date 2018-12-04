@@ -14,10 +14,10 @@ f_taylor = taylor(f,z,'ExpansionPoint',zd,'Order', 4);
 J = z'*S*z;
 Jdot = 2*z'*S*f_taylor;
 
-rho = 1
+rho = -50
 INFO.feasratio = 1
 while INFO.feasratio>0
-rho = rho+1;
+rho = rho-50;
 prog = sosprogram(z);
 [prog,h] = sossosvar(prog,z);
 expr =-(Jdot+h*(rho - J))-0.001*sum(z.*z);
@@ -27,6 +27,6 @@ solver_opt.solver = 'sedumi';
 h_solved = sosgetsol(prog,h);
 J_solved = sosgetsol(prog,J);
 double(subs(J_solved, z,zd))
-INFO
+rho
 end
 
