@@ -47,8 +47,9 @@ set(gca,'fontsize',20);
 animation(sita);
 
 
-%% RRT implementation
+%% RG-RRT implementation
 %% 
+tic
 sita_range = [-4 4];
 sita_dot_range = [-2 2];
 start = [0;0];
@@ -57,41 +58,67 @@ goal2 = [pi;0];
 goal_bias = 0.1;
 
 % Initialize tree
+id = 1;
 q_init.coord = [0;0];
 q_init.parent = [];
 q_init.id = 1;
 q_init.control = [];
 q_init.parent_id = 0;
+[tmax, ymax] = ode45(@(t,y)pendulum_dynamics(t,y,torque_limit),[0,0.1], start);
+[tmin, ymin] = ode45(@(t,y)pendulum_dynamics(t,y,-torque_limit),[0,0.1], start);
+q_init.reachable_set = zeros(2,2);
+q_init.reachable_set(:,1) = ymin(end,:)';
+q_init.reachable_set(:,2) = ymax(end,:)';
+id = id + 1;
 
-iterations = 4000;
+iterations = 1000;
 Tree.points = repmat(q_init,iterations+1,1);
 
 
-
 for i = 1:iterations
-    % goal bias
-    if rand() <= goal_bias
-        random_coord = goal;
-    else
-        sita = rand() * (sita_range(2) - sita_range(1)) + sita_range(1);
-        sita_dot = rand() * (sita_dot_range(2) - sita_dot_range(1)) + sita_dot_range(1);
-        random_coord = [sita;sita_dot];
-    end
-    
-    % find nearest point in tree
-    dist = inf;
-    n_points = max(size(Tree.points));
-    nearest_coord = [];
-    for j = 1:n_points
-        candidate = Tree.points(j).coord;
-        candidate_id = Tree.points(j).id;
-        if norm(random_coord - candidate, 2) < dist
-            dist = norm(random_coord - candidate, 2);
-            nearest_coord = candidate;  
-            nearest_id = candidate_id;
+    while true
+        % goal bias
+        is_goal_bias = false;
+        if rand() <= goal_bias
+            is_goal_bias = true;
+            random_coord = goal;
+        else
+            sita = rand() * (sita_range(2) - sita_range(1)) + sita_range(1);
+            sita_dot = rand() * (sita_dot_range(2) - sita_dot_range(1)) + sita_dot_range(1);
+            random_coord = [sita;sita_dot];
         end
+        % find nearest point in tree
+        dist = inf;
+        n_points = max(size(Tree.points));
+        nearest_coord = [];
+        for j = 1:n_points
+            candidate = Tree.points(j).coord;
+            candidate_id = Tree.points(j).id;
+            if norm(random_coord - candidate, 2) < dist
+                dist = norm(random_coord - candidate, 2);
+                nearest_coord = candidate;  
+                nearest_id = candidate_id;
+            end
+        end
+        
+        if is_goal_bias == true
+            
+            % Since this is goal biased, don't care if it expands
+            % efficiently
+            break;
+        end
+        
+        % Check if the nearest point efficeiently expands the workspace
+        nearest_point = Tree.points(nearest_id);
+        
+        if dist > norm(random_coord - nearest_point.reachable_set(:,1))
+            break
+        end
+        if dist > norm(random_coord - nearest_point.reachable_set(:,2))
+            break
+        end      
+
     end
-    
     % reach to the sampled point from the nearest coord
     dist = inf;
     for u = -torque_limit:torque_limit:torque_limit
@@ -102,15 +129,42 @@ for i = 1:iterations
             best_u = u;
         end
     end
-     
+    
+    % check if this point is new
+    %{
+    repeated = false;
+    for j = 1:n_points
+        candidate = Tree.points(j).coord;
+        if new_coord(1) == candidate(1) && new_coord(2) == candidate(2)
+            repeated = true;
+            break;
+        end
+    end
+    
+    if repeated
+        fprintf("repeated\n");
+        continue;
+    end
+    %}
     q.coord = new_coord;
     q.parent = nearest_coord;
     q.parent_id = nearest_id;
-    q.id = i+1;
+    q.id = id;
     q.control = best_u;
+    % Find reachable set
+    [tmax, ymax] = ode45(@(t,y)pendulum_dynamics(t,y,torque_limit),[0,0.1], new_coord);
+    [tmin, ymin] = ode45(@(t,y)pendulum_dynamics(t,y,-torque_limit),[0,0.1], new_coord);
+    q.reachable_set = zeros(2,2);
+    q.reachable_set(:,1) = ymin(end,:)';
+    q.reachable_set(:,2) = ymax(end,:)';
     Tree.points(i+1) = q;
+    
+    % Check if reached goal
+    if norm(new_coord - goal,2) < 0.1
+        fprintf("reached goal at %d\n",i);
+        break;
+    end
 end
-
 
 % plot the tree
 figure();
@@ -126,7 +180,7 @@ end
 scatter([-pi pi],[0 0],'black');
 axis([sita_range sita_dot_range]);
 title('RRT')
-
+toc
 %% 
 
 % Track the path
